@@ -1,399 +1,566 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Schachanalyse mit Stockfish</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #1a1a1a;
-      --bg2: #242424;
-      --bg3: #2e2e2e;
-      --border: rgba(255,255,255,0.1);
-      --text: #e8e8e8;
-      --text2: #999;
-      --accent: #81b64c;
-      --accent2: #f6f669;
-      --radius: 8px;
-    }
-    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
-    header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 17px; font-weight: 500; }
-    header span { font-size: 12px; color: var(--text2); background: var(--bg3); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); }
-    #app { display: grid; grid-template-columns: auto 1fr; gap: 20px; padding: 20px 24px; max-width: 900px; }
-    @media (max-width: 640px) { #app { grid-template-columns: 1fr; } }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schachanalyse & Endspieltrainer</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#1a1a1a;--bg2:#242424;--bg3:#2e2e2e;--bg4:#383838;
+  --border:rgba(255,255,255,0.1);--text:#e8e8e8;--text2:#999;
+  --accent:#81b64c;--accent2:#f6f669;--purple:#a78bfa;
+  --r:8px;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+header h1{font-size:16px;font-weight:500}
+#statusbar{font-size:12px;color:var(--text2);padding:6px 20px 0}
 
-    /* Board */
-    #board-section { display: flex; flex-direction: column; gap: 8px; }
-    canvas#board { display: block; border-radius: var(--radius); border: 1px solid var(--border); cursor: pointer; }
-    #turn-badge { font-size: 12px; color: var(--text2); text-align: center; }
+/* Tab nav */
+#tabs{display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 20px;margin-bottom:0}
+.tab{padding:9px 16px;font-size:13px;cursor:pointer;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
 
-    /* Sidebar */
-    #sidebar { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
-    .card-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
+#app{display:grid;grid-template-columns:auto 1fr;gap:18px;padding:16px 20px;max-width:880px}
+@media(max-width:640px){#app{grid-template-columns:1fr}}
 
-    /* Eval */
-    #eval-row { display: flex; align-items: center; gap: 10px; }
-    #eval-bar-bg { flex: 1; height: 10px; background: #111; border-radius: 5px; overflow: hidden; }
-    #eval-bar-fill { height: 100%; background: #e8e8e8; border-radius: 5px; transition: width 0.5s cubic-bezier(.4,0,.2,1); width: 50%; }
-    #eval-num { font-size: 15px; font-weight: 600; min-width: 52px; text-align: right; }
-    #best-move { font-size: 22px; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; margin-top: 4px; }
-    #best-move-label { font-size: 12px; color: var(--text2); }
-    #spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; display: none; flex-shrink: 0; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+/* Board */
+#board-wrap{display:flex;flex-direction:column;gap:6px}
+canvas#board{display:block;border-radius:var(--r);border:1px solid var(--border);cursor:pointer}
+#turn-badge{font-size:12px;color:var(--text2);text-align:center}
 
-    /* Lines */
-    .line { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-    .line:last-child { border-bottom: none; padding-bottom: 0; }
-    .line-score { font-weight: 600; min-width: 46px; color: var(--accent2); }
-    .line-moves { color: var(--text2); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .line-depth { font-size: 10px; color: #555; flex-shrink: 0; }
+/* Sidebar */
+#sidebar{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px}
+.clabel{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
 
-    /* Inputs */
-    label.field-label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; }
-    input[type="text"], textarea {
-      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
-      color: var(--text); font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px;
-      padding: 8px 10px; outline: none; transition: border-color 0.15s;
-    }
-    input[type="text"]:focus, textarea:focus { border-color: rgba(255,255,255,0.3); }
-    textarea { height: 72px; resize: vertical; }
-    .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-    button {
-      padding: 6px 12px; border-radius: var(--radius); border: 1px solid var(--border);
-      background: var(--bg3); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.15s;
-    }
-    button:hover { background: #3a3a3a; border-color: rgba(255,255,255,0.2); }
-    button.primary { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 500; }
-    button.primary:hover { background: #90c855; }
-    button.claude-btn { background: transparent; border-color: #7c3aed; color: #a78bfa; width: 100%; margin-top: 4px; }
-    button.claude-btn:hover { background: rgba(124,58,237,0.15); }
+/* Eval */
+#eval-row{display:flex;align-items:center;gap:8px}
+#eval-bar-bg{flex:1;height:9px;background:#111;border-radius:5px;overflow:hidden}
+#eval-bar-fill{height:100%;background:#e8e8e8;border-radius:5px;transition:width .5s cubic-bezier(.4,0,.2,1);width:50%}
+#eval-num{font-size:14px;font-weight:600;min-width:50px;text-align:right}
+#best-move{font-size:20px;font-weight:600;color:var(--accent);margin-top:4px}
+#spinner{width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:none;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-    /* Depth */
-    #depth-row { display: flex; align-items: center; gap: 10px; }
-    #depth-row label { font-size: 12px; color: var(--text2); white-space: nowrap; }
-    input[type="range"] { flex: 1; accent-color: var(--accent); }
-    #depth-val { font-size: 13px; font-weight: 600; min-width: 22px; }
+/* Lines */
+.line{display:flex;gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px}
+.line:last-child{border-bottom:none;padding-bottom:0}
+.ls{font-weight:600;min-width:44px;color:var(--accent2)}
+.lm{color:var(--text2);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ld{font-size:10px;color:#555;flex-shrink:0}
 
-    /* Nav */
-    #move-nav { display: none; align-items: center; gap: 8px; margin-top: 8px; }
-    #move-list { font-size: 12px; color: var(--text2); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: monospace; }
+/* Mode panels */
+.panel{display:none}.panel.active{display:block}
 
-    /* Status */
-    #statusbar { font-size: 12px; color: var(--text2); padding: 8px 24px 12px; }
+/* Inputs */
+label.fl{display:block;font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
+input[type=text],textarea,select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-family:inherit;font-size:12px;padding:7px 9px;outline:none;transition:border-color .15s}
+input[type=text]:focus,textarea:focus,select:focus{border-color:rgba(255,255,255,.3)}
+textarea{height:68px;resize:vertical;font-family:'Courier New',monospace}
+input[type=text].mono{font-family:'Courier New',monospace}
+.brow{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+button{padding:6px 11px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;transition:all .15s}
+button:hover{background:var(--bg4);border-color:rgba(255,255,255,.2)}
+button.primary{background:var(--accent);color:#1a1a1a;border-color:var(--accent);font-weight:500}
+button.primary:hover{background:#90c855}
+button.danger{background:transparent;border-color:#ef4444;color:#f87171}
+button.danger:hover{background:rgba(239,68,68,.15)}
 
-    /* Toast */
-    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #ef4444; color: #fff; padding: 8px 16px; border-radius: var(--radius); font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 99; }
-    #toast.show { opacity: 1; }
-  </style>
+/* Move nav */
+#move-nav{display:none;align-items:center;gap:6px;margin-top:8px}
+#move-list{font-size:12px;color:var(--text2);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-family:monospace}
+
+/* Depth */
+#depth-row{display:flex;align-items:center;gap:8px}
+#depth-row label{font-size:12px;color:var(--text2);white-space:nowrap}
+input[type=range]{flex:1;accent-color:var(--accent)}
+#depth-val{font-size:12px;font-weight:600;min-width:20px}
+
+/* Endgame panel */
+#eg-presets{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+.preset-btn{padding:7px 8px;font-size:12px;text-align:left;border-radius:var(--r);border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;transition:all .15s;line-height:1.3}
+.preset-btn:hover{background:var(--bg3);border-color:rgba(255,255,255,.25)}
+.preset-btn span{display:block;font-size:10px;color:var(--text2);margin-top:2px}
+
+/* Chat */
+#chat-box{display:flex;flex-direction:column;gap:0;max-height:220px;overflow-y:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:8px}
+.chat-msg{padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);line-height:1.5}
+.chat-msg:last-child{border-bottom:none}
+.chat-msg.user{color:var(--text2)}
+.chat-msg.user::before{content:'Du: ';font-weight:600}
+.chat-msg.ai{color:var(--text)}
+.chat-msg.ai::before{content:'Claude: ';font-weight:600;color:var(--purple)}
+.chat-msg.thinking{color:#555;font-style:italic}
+#chat-input-row{display:flex;gap:6px}
+#chat-input{flex:1;font-family:inherit}
+#chat-input::placeholder{color:#555}
+
+/* Suggestions */
+#suggestions{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:7px}
+.sug{font-size:11px;padding:3px 8px;border-radius:20px;border:1px solid var(--border);background:var(--bg);color:var(--text2);cursor:pointer;transition:all .15s}
+.sug:hover{border-color:var(--purple);color:var(--purple)}
+
+/* Toast */
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#ef4444;color:#fff;padding:7px 14px;border-radius:var(--r);font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:99}
+#toast.show{opacity:1}
+</style>
 </head>
 <body>
 
 <header>
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16l-1.447.724a1 1 0 00-.553.894V20h12v-2.382a1 1 0 00-.553-.894L16 16"/><path d="M12 4c-2 0-4 1.5-4 4 0 1.5.5 2.5 1 3l-1 2h8l-1-2c.5-.5 1-1.5 1-3 0-2.5-2-4-4-4z"/><line x1="12" y1="4" x2="12" y2="2"/><line x1="8" y1="20" x2="16" y2="20"/></svg>
-  <h1>Schachanalyse</h1>
-  <span>Stockfish WebAssembly</span>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16l-1.447.724A1 1 0 006 17.618V20h12v-2.382a1 1 0 00-.553-.894L16 16"/><path d="M12 4c-2 0-4 1.5-4 4 0 1.5.5 2.5 1 3l-1 2h8l-1-2c.5-.5 1-1.5 1-3 0-2.5-2-4-4-4z"/><line x1="12" y1="4" x2="12" y2="2"/></svg>
+  <h1>Schachanalyse & Endspieltrainer</h1>
 </header>
+
+<div id="tabs">
+  <div class="tab active" onclick="switchTab('analyse')">Analyse</div>
+  <div class="tab" onclick="switchTab('endgame')">Endspieltrainer</div>
+</div>
 
 <div id="statusbar">Stockfish wird geladen…</div>
 
 <div id="app">
-  <div id="board-section">
+  <!-- Board (always visible) -->
+  <div id="board-wrap">
     <canvas id="board" width="360" height="360"></canvas>
     <div id="turn-badge">Weiß am Zug</div>
   </div>
 
+  <!-- Sidebar -->
   <div id="sidebar">
+    <!-- Eval card (always) -->
     <div class="card">
-      <div class="card-label" style="display:flex;align-items:center;gap:8px;">Bewertung <div id="spinner"></div></div>
+      <div class="clabel" style="display:flex;align-items:center;gap:7px">Bewertung <div id="spinner"></div></div>
       <div id="eval-row">
         <div id="eval-bar-bg"><div id="eval-bar-fill"></div></div>
         <div id="eval-num">—</div>
       </div>
-      <div style="margin-top:10px;">
-        <div id="best-move-label" style="margin-bottom:2px;">Bester Zug</div>
+      <div style="margin-top:8px">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:2px">Bester Zug</div>
         <div id="best-move">—</div>
       </div>
     </div>
 
+    <!-- Lines -->
     <div class="card">
-      <div class="card-label">Top-3-Varianten</div>
-      <div id="lines-box"><div class="line"><span class="line-moves">Noch keine Analyse</span></div></div>
+      <div class="clabel">Top-3-Varianten</div>
+      <div id="lines-box"><div class="line"><span class="lm">Noch keine Analyse</span></div></div>
     </div>
 
-    <div class="card">
-      <div class="card-label">Suchtiefe</div>
-      <div id="depth-row">
-        <label>Tiefe</label>
-        <input type="range" id="depth-slider" min="5" max="22" value="15" step="1">
-        <span id="depth-val">15</span>
+    <!-- ANALYSE TAB -->
+    <div id="panel-analyse" class="panel active">
+      <div class="card">
+        <div class="clabel">Brett-Steuerung</div>
+        <div class="brow">
+          <button onclick="resetBoard()">Startstellung</button>
+          <button onclick="flipBoard()">Drehen</button>
+          <button class="danger" onclick="undoMove()">⌫ Zug zurück</button>
+        </div>
+      </div>
+      <div class="card">
+        <label class="fl">FEN laden</label>
+        <input type="text" id="fen-input" class="mono" placeholder="FEN hier einfügen…">
+        <div class="brow">
+          <button class="primary" onclick="loadFen()">Laden</button>
+        </div>
+      </div>
+      <div class="card">
+        <label class="fl">PGN-Partie</label>
+        <textarea id="pgn-input" placeholder="1. e4 e5 2. Nf3 Nc6 …"></textarea>
+        <div class="brow">
+          <button class="primary" onclick="loadPgn()">Laden</button>
+        </div>
+        <div id="move-nav">
+          <button onclick="navMove(-999)">|«</button>
+          <button onclick="navMove(-1)">‹</button>
+          <div id="move-list"></div>
+          <button onclick="navMove(1)">›</button>
+          <button onclick="navMove(999)">»|</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="clabel">Suchtiefe</div>
+        <div id="depth-row">
+          <label>Tiefe</label>
+          <input type="range" id="depth-slider" min="5" max="22" value="15" step="1">
+          <span id="depth-val">15</span>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <label class="field-label">FEN laden</label>
-      <input type="text" id="fen-input" placeholder="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1">
-      <div class="btn-row">
-        <button class="primary" onclick="loadFen()">Laden & analysieren</button>
-        <button onclick="resetBoard()">Startstellung</button>
-        <button onclick="flipBoard()">Brett drehen</button>
+    <!-- ENDGAME TAB -->
+    <div id="panel-endgame" class="panel">
+      <div class="card">
+        <div class="clabel">Endspiel laden</div>
+        <div id="eg-presets">
+          <button class="preset-btn" onclick="loadEndgame('KRkp')">♔♖ vs ♚♟<span>König + Turm vs König + Bauer</span></button>
+          <button class="preset-btn" onclick="loadEndgame('KRkr')">♔♖ vs ♚♜<span>Turmendspiel</span></button>
+          <button class="preset-btn" onclick="loadEndgame('KPkp')">♔♟ vs ♚♙<span>Bauernendspiel</span></button>
+          <button class="preset-btn" onclick="loadEndgame('KRPkp')">♔♖♙ vs ♚♟<span>Turm + Bauer Vorteil</span></button>
+          <button class="preset-btn" onclick="loadEndgame('KQkr')">♔♛ vs ♚♜<span>Dame vs Turm</span></button>
+          <button class="preset-btn" onclick="loadEndgame('KBNk')">♔♗♘ vs ♚<span>Läufer + Springer Matt</span></button>
+          <button class="preset-btn" onclick="loadEndgame('KRk')">♔♖ vs ♚<span>Einfaches Turmendspiel</span></button>
+          <button class="preset-btn" onclick="loadEndgame('custom')">✏️ Eigene FEN<span>Stellung selbst eingeben</span></button>
+        </div>
+        <div id="eg-custom" style="display:none">
+          <label class="fl">Eigene FEN</label>
+          <input type="text" id="eg-fen" class="mono" placeholder="FEN eingeben…">
+          <div class="brow"><button class="primary" onclick="loadCustomEg()">Laden</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="clabel">Fragen stellen</div>
+        <div id="suggestions">
+          <span class="sug" onclick="askQ(this.textContent)">Wer steht auf Gewinn?</span>
+          <span class="sug" onclick="askQ(this.textContent)">Was sind schwache Felder?</span>
+          <span class="sug" onclick="askQ(this.textContent)">Wie lautet der Plan?</span>
+          <span class="sug" onclick="askQ(this.textContent)">Ist das Remis?</span>
+          <span class="sug" onclick="askQ(this.textContent)">Erkläre die Schlüsselkonzepte</span>
+          <span class="sug" onclick="askQ(this.textContent)">Wo sind die Schwächen?</span>
+        </div>
+        <div id="chat-box"></div>
+        <div id="chat-input-row">
+          <input type="text" id="chat-input" placeholder="Frage zur Stellung…" onkeydown="if(event.key==='Enter')sendChat()">
+          <button class="primary" onclick="sendChat()">→</button>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <label class="field-label">PGN-Partie</label>
-      <textarea id="pgn-input" placeholder="1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 …"></textarea>
-      <div class="btn-row">
-        <button class="primary" onclick="loadPgn()">Partie laden</button>
-      </div>
-      <div id="move-nav">
-        <button onclick="navMove(-10)">«</button>
-        <button onclick="navMove(-1)">‹</button>
-        <div id="move-list"></div>
-        <button onclick="navMove(1)">›</button>
-        <button onclick="navMove(10)">»</button>
-      </div>
-    </div>
-  </div>
-</div>
+  </div><!-- /sidebar -->
+</div><!-- /app -->
 
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script>
-const STOCKFISH_URL = 'stockfish.js';
-const COLS = 'abcdefgh';
-const PIECE_GLYPHS = {
-  wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',
-  bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'
+// ── Constants & state ────────────────────────────────────
+const COLS='abcdefgh';
+const GLYPHS={wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'};
+const ENDGAMES={
+  KRk:'8/8/8/8/3K4/8/8/R3k3 w - - 0 1',
+  KRkp:'8/8/8/8/3K4/8/p7/R3k3 w - - 0 1',
+  KRkr:'8/8/8/8/3K4/8/r7/R3k3 w - - 0 1',
+  KPkp:'8/p7/8/8/8/8/P7/4K2k w - - 0 1',
+  KRPkp:'8/8/8/3K4/8/P7/p7/R3k3 w - - 0 1',
+  KQkr:'8/8/8/3K4/8/8/r7/Q3k3 w - - 0 1',
+  KBNk:'8/8/8/3K4/8/2B5/2N5/4k3 w - - 0 1',
 };
 
-let sf = null, sfReady = false;
-let chess = new Chess();
-let flipped = false, selected = null, highlights = {};
-let pgnMoves = [], pgnIdx = -1;
-let depth = 15, sfLines = {}, analyzing = false;
+let sf=null,sfReady=false;
+let chess=new Chess();
+let flipped=false,selected=null,highlights={};
+let pgnMoves=[],pgnIdx=-1;
+let depth=15,sfLines={},analyzing=false;
+let currentTab='analyse';
+let chatHistory=[];
 
-const canvas = document.getElementById('board');
-const ctx = canvas.getContext('2d');
-const SZ = 45;
+const canvas=document.getElementById('board');
+const ctx=canvas.getContext('2d');
+const SZ=45;
 
-// ── Board rendering ──────────────────────────────────────
-function sq2xy(sq) {
-  const f = COLS.indexOf(sq[0]), r = parseInt(sq[1]) - 1;
-  const col = flipped ? 7-f : f, row = flipped ? r : 7-r;
-  return [col*SZ, row*SZ];
-}
-function xy2sq(px, py) {
-  const col = Math.floor(px/SZ), row = Math.floor(py/SZ);
-  const f = flipped ? 7-col : col, r = flipped ? row : 7-row;
-  if (f<0||f>7||r<0||r>7) return null;
-  return COLS[f]+(r+1);
+// ── Tabs ─────────────────────────────────────────────────
+function switchTab(t){
+  currentTab=t;
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',['analyse','endgame'][i]===t));
+  document.getElementById('panel-analyse').classList.toggle('active',t==='analyse');
+  document.getElementById('panel-endgame').classList.toggle('active',t==='endgame');
 }
 
-function drawBoard() {
-  canvas.width = canvas.height = SZ * 8;
-  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
-    ctx.fillStyle = (r+c)%2===0 ? '#f0d9b5' : '#b58863';
-    ctx.fillRect(c*SZ, r*SZ, SZ, SZ);
-  }
-  for (const [sq,col] of Object.entries(highlights)) {
-    const [x,y] = sq2xy(sq);
-    ctx.fillStyle = col; ctx.fillRect(x, y, SZ, SZ);
-  }
-  const board = chess.board();
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  for (let r=0;r<8;r++) for (let c=0;c<8;c++) {
-    const ar = flipped ? r : 7-r, ac = flipped ? 7-c : c;
-    const piece = board[ar]?.[ac];
-    if (piece) {
-      const g = PIECE_GLYPHS[piece.color+piece.type.toUpperCase()];
-      ctx.font = `${SZ*0.74}px serif`;
-      ctx.fillStyle = piece.color==='w' ? '#fff' : '#1a1a1a';
-      ctx.strokeStyle = piece.color==='w' ? '#555' : '#ddd';
-      ctx.lineWidth = 0.6;
-      const x=c*SZ+SZ/2, y=r*SZ+SZ/2;
-      ctx.strokeText(g,x,y); ctx.fillText(g,x,y);
+// ── Board rendering ───────────────────────────────────────
+function sq2xy(sq){const f=COLS.indexOf(sq[0]),r=parseInt(sq[1])-1;return[(flipped?7-f:f)*SZ,(flipped?r:7-r)*SZ]}
+function xy2sq(px,py){const c=Math.floor(px/SZ),r=Math.floor(py/SZ);const f=flipped?7-c:c,rank=flipped?r:7-r;if(f<0||f>7||rank<0||rank>7)return null;return COLS[f]+(rank+1)}
+
+function drawBoard(){
+  canvas.width=canvas.height=SZ*8;
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){ctx.fillStyle=(r+c)%2===0?'#f0d9b5':'#b58863';ctx.fillRect(c*SZ,r*SZ,SZ,SZ)}
+  for(const[sq,col]of Object.entries(highlights)){const[x,y]=sq2xy(sq);ctx.fillStyle=col;ctx.fillRect(x,y,SZ,SZ)}
+  const board=chess.board();
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+    const ar=flipped?r:7-r,ac=flipped?7-c:c;
+    const p=board[ar]?.[ac];
+    if(p){
+      const g=GLYPHS[p.color+p.type.toUpperCase()];
+      ctx.font=`${SZ*.74}px serif`;
+      ctx.fillStyle=p.color==='w'?'#fff':'#1a1a1a';
+      ctx.strokeStyle=p.color==='w'?'#555':'#ddd';
+      ctx.lineWidth=.6;
+      const x=c*SZ+SZ/2,y=r*SZ+SZ/2;
+      ctx.strokeText(g,x,y);ctx.fillText(g,x,y);
     }
   }
-  ctx.font='10px sans-serif'; ctx.fillStyle='rgba(80,60,40,0.7)';
-  for (let i=0;i<8;i++) {
-    ctx.fillText(flipped ? i+1 : 8-i, 3, i*SZ+11);
-    ctx.fillText(COLS[flipped ? 7-i : i], i*SZ+SZ-8, SZ*8-3);
-  }
-  const turn = chess.turn();
-  document.getElementById('turn-badge').textContent = turn==='w' ? 'Weiß am Zug' : 'Schwarz am Zug';
+  ctx.font='9px sans-serif';ctx.fillStyle='rgba(80,60,40,.7)';
+  for(let i=0;i<8;i++){ctx.fillText(flipped?i+1:8-i,3,i*SZ+10);ctx.fillText(COLS[flipped?7-i:i],i*SZ+SZ-7,SZ*8-3)}
+  const t=chess.turn();
+  document.getElementById('turn-badge').textContent=t==='w'?'⬜ Weiß am Zug':'⬛ Schwarz am Zug';
 }
 
-// ── Click handling ────────────────────────────────────────
-canvas.addEventListener('click', e => {
-  const rect = canvas.getBoundingClientRect();
-  const sq = xy2sq((e.clientX-rect.left)*(canvas.width/rect.width), (e.clientY-rect.top)*(canvas.height/rect.height));
-  if (!sq) return;
-  if (selected) {
-    const mv = chess.moves({square:selected,verbose:true}).find(m=>m.to===sq);
-    if (mv) {
-      const promo = mv.flags.includes('p') ? window.prompt('Umwandlung? (q/r/b/n)','q') : undefined;
-      chess.move({...mv, promotion: promo||'q'});
-      selected=null; highlights={}; drawBoard(); startAnalysis();
+// ── Click / move handling ────────────────────────────────
+canvas.addEventListener('click',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const sq=xy2sq((e.clientX-rect.left)*(canvas.width/rect.width),(e.clientY-rect.top)*(canvas.height/rect.height));
+  if(!sq)return;
+  if(selected){
+    const mv=chess.moves({square:selected,verbose:true}).find(m=>m.to===sq);
+    if(mv){
+      const promo=mv.flags.includes('p')?promptPromo():undefined;
+      chess.move({...mv,promotion:promo||'q'});
+      selected=null;highlights={};
+      drawBoard();startAnalysis();
     } else {
-      selected=null; highlights={};
+      selected=null;highlights={};
       const p=chess.get(sq);
-      if (p&&p.color===chess.turn()) selectSq(sq);
+      // Allow clicking any piece regardless of color (both sides playable)
+      if(p){selectSq(sq,p);}
       drawBoard();
     }
   } else {
     const p=chess.get(sq);
-    if (p&&p.color===chess.turn()) { selectSq(sq); drawBoard(); }
+    if(p){selectSq(sq,p);drawBoard();}
   }
 });
 
-function selectSq(sq) {
-  selected=sq; highlights={};
-  highlights[sq]='rgba(255,255,0,0.45)';
-  chess.moves({square:sq,verbose:true}).forEach(m=>{ highlights[m.to]='rgba(0,210,80,0.3)'; });
+function selectSq(sq,p){
+  // Only show legal move hints if it's that color's turn
+  selected=sq;highlights={};
+  highlights[sq]='rgba(255,255,0,.45)';
+  if(p.color===chess.turn()){
+    chess.moves({square:sq,verbose:true}).forEach(m=>{highlights[m.to]='rgba(0,210,80,.3)'});
+  }
 }
 
-// ── Load FEN / PGN ────────────────────────────────────────
-function loadFen() {
-  const fen=document.getElementById('fen-input').value.trim();
-  if (!fen) return;
-  const tmp=new Chess(); if (!tmp.load(fen)) { toast('Ungültige FEN!'); return; }
-  chess=tmp; selected=null; highlights={}; pgnMoves=[]; pgnIdx=-1;
-  document.getElementById('move-nav').style.display='none';
-  drawBoard(); startAnalysis();
+function promptPromo(){
+  const choice=window.prompt('Umwandlung? q=Dame r=Turm b=Läufer n=Springer','q');
+  return['q','r','b','n'].includes(choice)?choice:'q';
 }
 
-function resetBoard() {
-  chess=new Chess(); selected=null; highlights={};
+// ── Board controls ────────────────────────────────────────
+function resetBoard(){
+  chess=new Chess();selected=null;highlights={};
+  pgnMoves=[];pgnIdx=-1;
   document.getElementById('fen-input').value='';
   document.getElementById('pgn-input').value='';
   document.getElementById('move-nav').style.display='none';
-  pgnMoves=[]; pgnIdx=-1; drawBoard(); startAnalysis();
+  drawBoard();startAnalysis();
 }
 
-function flipBoard() { flipped=!flipped; drawBoard(); }
+function flipBoard(){flipped=!flipped;drawBoard()}
 
-function loadPgn() {
-  const pgn=document.getElementById('pgn-input').value.trim();
-  if (!pgn) return;
+function undoMove(){
+  if(chess.history().length===0){toast('Keine Züge zum Zurücknehmen');return}
+  chess.undo();selected=null;highlights={};
+  drawBoard();startAnalysis();
+}
+
+function loadFen(){
+  const fen=document.getElementById('fen-input').value.trim();
+  if(!fen)return;
   const tmp=new Chess();
-  if (!tmp.load_pgn(pgn)) { toast('Ungültiger PGN!'); return; }
-  pgnMoves=tmp.history({verbose:true}); pgnIdx=-1;
-  chess=new Chess(); selected=null; highlights={};
+  if(!tmp.load(fen)){toast('Ungültige FEN!');return}
+  chess=tmp;selected=null;highlights={};
+  pgnMoves=[];pgnIdx=-1;
+  document.getElementById('move-nav').style.display='none';
+  drawBoard();startAnalysis();
+}
+
+function loadPgn(){
+  const pgn=document.getElementById('pgn-input').value.trim();
+  if(!pgn)return;
+  const tmp=new Chess();
+  if(!tmp.load_pgn(pgn)){toast('Ungültiger PGN!');return}
+  pgnMoves=tmp.history({verbose:true});pgnIdx=-1;
+  chess=new Chess();selected=null;highlights={};
   document.getElementById('move-nav').style.display='flex';
-  drawBoard(); updateMoveList(); startAnalysis();
+  drawBoard();updateMoveList();startAnalysis();
 }
 
-function navMove(dir) {
-  const ni=Math.max(-1,Math.min(pgnMoves.length-1, pgnIdx+dir));
-  if (ni===pgnIdx) return;
-  pgnIdx=ni; chess=new Chess();
-  for (let i=0;i<=pgnIdx;i++) chess.move(pgnMoves[i]);
-  selected=null; highlights={}; drawBoard(); updateMoveList(); startAnalysis();
+function navMove(dir){
+  const ni=Math.max(-1,Math.min(pgnMoves.length-1,pgnIdx+dir));
+  if(ni===pgnIdx)return;
+  pgnIdx=ni;chess=new Chess();
+  for(let i=0;i<=pgnIdx;i++)chess.move(pgnMoves[i]);
+  selected=null;highlights={};drawBoard();updateMoveList();startAnalysis();
 }
 
-function updateMoveList() {
+function updateMoveList(){
   const txt=pgnMoves.slice(0,pgnIdx+1).map((m,i)=>(i%2===0?Math.floor(i/2+1)+'.':'')+m.san).join(' ');
   document.getElementById('move-list').textContent=txt||'Startstellung';
   document.getElementById('move-list').title=txt;
 }
 
+// ── Endgame presets ───────────────────────────────────────
+function loadEndgame(key){
+  document.getElementById('eg-custom').style.display=key==='custom'?'block':'none';
+  if(key==='custom')return;
+  const fen=ENDGAMES[key];
+  if(!fen)return;
+  chess=new Chess(fen);selected=null;highlights={};
+  pgnMoves=[];pgnIdx=-1;
+  drawBoard();startAnalysis();
+  chatHistory=[];
+  document.getElementById('chat-box').innerHTML='';
+  addChatMsg('ai','Stellung geladen. Stell mir Fragen zur Stellung oder klick auf eine Suggestion oben!');
+}
+
+function loadCustomEg(){
+  const fen=document.getElementById('eg-fen').value.trim();
+  if(!fen)return;
+  const tmp=new Chess();
+  if(!tmp.load(fen)){toast('Ungültige FEN!');return}
+  chess=tmp;selected=null;highlights={};drawBoard();startAnalysis();
+  chatHistory=[];document.getElementById('chat-box').innerHTML='';
+  addChatMsg('ai','Eigene Stellung geladen. Was möchtest du wissen?');
+}
+
 // ── Stockfish ─────────────────────────────────────────────
-function initStockfish() {
+function initStockfish(){
   setStatus('Stockfish wird geladen…');
-  sf=new Worker(STOCKFISH_URL);
+  sf=new Worker('stockfish.js');
   sf.onmessage=e=>handleSf(e.data);
-  sf.onerror=()=>setStatus('Fehler beim Laden von Stockfish.');
+  sf.onerror=()=>setStatus('Fehler beim Laden von Stockfish. Liegt stockfish.js im selben Ordner?');
   sf.postMessage('uci');
 }
 
-function handleSf(msg) {
-  if (msg==='uciok') { sf.postMessage('isready'); return; }
-  if (msg==='readyok') {
-    sfReady=true; setStatus('Stockfish bereit ✓');
-    drawBoard(); startAnalysis(); return;
-  }
-  if (msg.startsWith('info')&&msg.includes('score')&&msg.includes(' pv ')) {
+function handleSf(msg){
+  if(msg==='uciok'){sf.postMessage('isready');return}
+  if(msg==='readyok'){sfReady=true;setStatus('Stockfish bereit ✓');drawBoard();startAnalysis();return}
+  if(msg.startsWith('info')&&msg.includes('score')&&msg.includes(' pv ')){
     const cp=msg.match(/score cp (-?\d+)/);
     const mate=msg.match(/score mate (-?\d+)/);
     const pv=msg.match(/ pv (.+)/);
     const mp=parseInt((msg.match(/multipv (\d+)/)||[,1])[1]);
     const d=parseInt((msg.match(/depth (\d+)/)||[,0])[1]);
     let score=null;
-    if (cp) score=parseInt(cp[1])/100;
-    if (mate) score=parseInt(mate[1])>0?999:-999;
-    if (score!==null&&pv&&d>=5) {
+    if(cp)score=parseInt(cp[1])/100;
+    if(mate)score=parseInt(mate[1])>0?999:-999;
+    if(score!==null&&pv&&d>=5){
       sfLines[mp]={score,pv:pv[1].split(' '),depth:d};
-      if (mp===1) updateEval(score);
+      if(mp===1)updateEval(score);
       updateLines();
     }
   }
-  if (msg.startsWith('bestmove')) {
-    analyzing=false;
-    document.getElementById('spinner').style.display='none';
-  }
+  if(msg.startsWith('bestmove')){analyzing=false;document.getElementById('spinner').style.display='none'}
 }
 
-function uci2san(uci) {
+function uci2san(uci){
   const tmp=new Chess(chess.fen());
   const m=tmp.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]||'q'});
   return m?m.san:uci;
 }
 
-function updateEval(score) {
+function updateEval(score){
   const ws=chess.turn()==='w'?score:-score;
   const pct=Math.max(4,Math.min(96,50+ws*5));
   document.getElementById('eval-bar-fill').style.width=pct+'%';
   const disp=score>=999?'Matt':score<=-999?'-Matt':(score>=0?'+':'')+score.toFixed(2);
   document.getElementById('eval-num').textContent=disp;
   const bm=sfLines[1];
-  if (bm?.pv?.length) {
+  if(bm?.pv?.length){
     document.getElementById('best-move').textContent=uci2san(bm.pv[0])||bm.pv[0];
-    highlights={};
     const uci=bm.pv[0];
-    highlights[uci.slice(0,2)]='rgba(129,182,76,0.35)';
-    highlights[uci.slice(2,4)]='rgba(129,182,76,0.55)';
+    highlights={};
+    highlights[uci.slice(0,2)]='rgba(129,182,76,.35)';
+    highlights[uci.slice(2,4)]='rgba(129,182,76,.55)';
     drawBoard();
   }
 }
 
-function updateLines() {
-  const box=document.getElementById('lines-box');
-  box.innerHTML=Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
+function updateLines(){
+  document.getElementById('lines-box').innerHTML=Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
     const s=l.score>=999?'Matt':l.score<=-999?'-Matt':(l.score>=0?'+':'')+l.score.toFixed(2);
     const moves=l.pv.slice(0,6).map(u=>uci2san(u)||u).filter(Boolean).join(' ');
-    return `<div class="line"><span class="line-score">${s}</span><span class="line-moves">${moves}</span><span class="line-depth">T${l.depth}</span></div>`;
+    return`<div class="line"><span class="ls">${s}</span><span class="lm">${moves}</span><span class="ld">T${l.depth}</span></div>`;
   }).join('');
 }
 
-function startAnalysis() {
-  if (!sfReady||chess.game_over()) return;
-  sfLines={}; analyzing=true;
+function startAnalysis(){
+  if(!sfReady||chess.game_over())return;
+  sfLines={};analyzing=true;
   document.getElementById('spinner').style.display='block';
   document.getElementById('best-move').textContent='…';
-  document.getElementById('lines-box').innerHTML='<div class="line"><span class="line-moves" style="color:#666">Analyse läuft…</span></div>';
+  document.getElementById('lines-box').innerHTML='<div class="line"><span class="lm" style="color:#666">Analyse läuft…</span></div>';
   sf.postMessage('stop');
   sf.postMessage('setoption name MultiPV value 3');
   sf.postMessage('position fen '+chess.fen());
   sf.postMessage('go depth '+depth);
-  setStatus('Analysiere bis Tiefe '+depth+' · '+chess.fen().split(' ').slice(0,4).join(' '));
+  setStatus('Analysiere · '+chess.fen().split(' ').slice(0,4).join(' '));
 }
 
 document.getElementById('depth-slider').addEventListener('input',function(){
-  depth=+this.value; document.getElementById('depth-val').textContent=depth;
+  depth=+this.value;document.getElementById('depth-val').textContent=depth;
 });
 document.getElementById('depth-slider').addEventListener('change',()=>startAnalysis());
 
-// ── Utilities ─────────────────────────────────────────────
-function setStatus(msg) { document.getElementById('statusbar').textContent=msg; }
+// ── Claude chat ───────────────────────────────────────────
+function askQ(q){document.getElementById('chat-input').value=q;sendChat()}
 
-function toast(msg) {
-  const t=document.getElementById('toast'); t.textContent=msg;
-  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2500);
+function addChatMsg(role,text){
+  const box=document.getElementById('chat-box');
+  const div=document.createElement('div');
+  div.className='chat-msg '+role;
+  div.textContent=text;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+  return div;
 }
+
+async function sendChat(){
+  const inp=document.getElementById('chat-input');
+  const q=inp.value.trim();
+  if(!q)return;
+  inp.value='';
+  addChatMsg('user',q);
+
+  const bm=sfLines[1];
+  const evalScore=document.getElementById('eval-num').textContent;
+  const lines=Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
+    const s=l.score>=999?'Matt':l.score<=-999?'-Matt':(l.score>=0?'+':'')+l.score.toFixed(2);
+    return s+': '+l.pv.slice(0,5).map(u=>uci2san(u)||u).join(' ');
+  }).join('\n');
+  const bestMove=bm?uci2san(bm.pv[0]):'unbekannt';
+  const history=chess.history().slice(-20).join(' ');
+
+  const systemPrompt=`Du bist ein erfahrener Schachtrainer. Antworte auf Deutsch, präzise und lehrreich.
+Aktuelle Stellung (FEN): ${chess.fen()}
+Stockfish-Bewertung: ${evalScore}
+Bester Zug: ${bestMove}
+Stockfish-Varianten:\n${lines||'keine'}
+Letzte Züge: ${history||'keine'}
+Analysiere die Stellung aus Sicht beider Seiten. Erkläre Konzepte verständlich.`;
+
+  chatHistory.push({role:'user',content:q});
+
+  const thinking=addChatMsg('thinking','Claude denkt…');
+
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:1000,
+        system:systemPrompt,
+        messages:chatHistory
+      })
+    });
+    const data=await res.json();
+    const reply=data.content?.map(c=>c.text||'').join('')||'Fehler bei der Antwort.';
+    thinking.remove();
+    addChatMsg('ai',reply);
+    chatHistory.push({role:'assistant',content:reply});
+    if(chatHistory.length>12)chatHistory=chatHistory.slice(-12);
+  }catch(err){
+    thinking.remove();
+    addChatMsg('ai','Verbindungsfehler zu Claude. Prüfe die API-Anbindung.');
+  }
+}
+
+// ── Utilities ─────────────────────────────────────────────
+function setStatus(msg){document.getElementById('statusbar').textContent=msg}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 
 // ── Init ──────────────────────────────────────────────────
 initStockfish();
