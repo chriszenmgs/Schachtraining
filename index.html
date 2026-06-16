@@ -274,7 +274,8 @@ function sq2xy(sq){const f=COLS.indexOf(sq[0]),r=parseInt(sq[1])-1;return[(flipp
 function xy2sq(px,py){const c=Math.floor(px/SZ),r=Math.floor(py/SZ);const f=flipped?7-c:c,rank=flipped?r:7-r;if(f<0||f>7||rank<0||rank>7)return null;return COLS[f]+(rank+1)}
 
 function drawBoard(){
-  canvas.width=canvas.height=SZ*8;
+  if(canvas.width!==SZ*8){canvas.width=canvas.height=SZ*8;}
+  ctx.clearRect(0,0,canvas.width,canvas.height);
   for(let r=0;r<8;r++)for(let c=0;c<8;c++){ctx.fillStyle=(r+c)%2===0?'#f0d9b5':'#b58863';ctx.fillRect(c*SZ,r*SZ,SZ,SZ)}
   for(const[sq,col]of Object.entries(highlights)){const[x,y]=sq2xy(sq);ctx.fillStyle=col;ctx.fillRect(x,y,SZ,SZ)}
   const board=chess.board();
@@ -301,19 +302,23 @@ function drawBoard(){
 // ── Click / move handling ────────────────────────────────
 canvas.addEventListener('click',e=>{
   const rect=canvas.getBoundingClientRect();
-  const sq=xy2sq((e.clientX-rect.left)*(canvas.width/rect.width),(e.clientY-rect.top)*(canvas.height/rect.height));
+  // Use rect dimensions for scaling (canvas CSS size vs pixel size)
+  const sq=xy2sq((e.clientX-rect.left)*(SZ*8/rect.width),(e.clientY-rect.top)*(SZ*8/rect.height));
   if(!sq)return;
   if(selected){
-    const mv=chess.moves({square:selected,verbose:true}).find(m=>m.to===sq);
+    const legalMoves=chess.moves({square:selected,verbose:true});
+    const mv=legalMoves.find(m=>m.to===sq);
     if(mv){
-      const promo=mv.flags.includes('p')?promptPromo():undefined;
-      chess.move({...mv,promotion:promo||'q'});
-      selected=null;highlights={};
-      drawBoard();startAnalysis();
+      const promo=mv.flags.includes('p')?promptPromo():'q';
+      const result=chess.move({from:selected,to:sq,promotion:promo});
+      if(result){
+        selected=null;highlights={};
+        drawBoard();startAnalysis();
+      }
     } else {
+      // Click on different square: deselect, maybe select new piece
       selected=null;highlights={};
       const p=chess.get(sq);
-      // Allow clicking any piece regardless of color (both sides playable)
       if(p){selectSq(sq,p);}
       drawBoard();
     }
