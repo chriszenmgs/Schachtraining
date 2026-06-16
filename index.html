@@ -156,7 +156,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="clabel">Brett-Steuerung</div>
         <div class="brow">
           <button onclick="resetBoard()">Startstellung</button>
-          <button onclick="flipBoard()">Drehen</button>
+          <button id="flip-btn" onclick="flipBoard()">Schwarz unten</button>
           <button class="danger" onclick="undoMove()">⌫ Zug zurück</button>
         </div>
       </div>
@@ -236,188 +236,226 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script>
-// ── Constants & state ────────────────────────────────────
 const COLS='abcdefgh';
 const GLYPHS={wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'};
+
 const ENDGAMES={
-  KRk:'8/8/8/8/3K4/8/8/R3k3 w - - 0 1',
-  KRkp:'8/8/8/8/3K4/8/p7/R3k3 w - - 0 1',
-  KRkr:'8/8/8/8/3K4/8/r7/R3k3 w - - 0 1',
-  KPkp:'8/p7/8/8/8/8/P7/4K2k w - - 0 1',
-  KRPkp:'8/8/8/3K4/8/P7/p7/R3k3 w - - 0 1',
-  KQkr:'8/8/8/3K4/8/8/r7/Q3k3 w - - 0 1',
-  KBNk:'8/8/8/3K4/8/2B5/2N5/4k3 w - - 0 1',
+  KRk:  '8/8/4k3/8/8/8/8/3RK3 w - - 0 1',
+  KRkp: '8/8/4k3/8/8/8/6p1/3RK3 b - - 0 1',
+  KRkr: '8/8/4k3/8/3r4/8/8/3RK3 w - - 0 1',
+  KPkp: '8/6k1/8/6p1/6P1/8/8/6K1 w - - 0 1',
+  KRPkp:'8/8/4k3/8/6P1/8/6p1/3RK3 w - - 0 1',
+  KQkr: '8/8/4k3/8/3r4/8/8/3QK3 w - - 0 1',
+  KBNk: '8/8/4k3/8/8/5BN1/8/4K3 w - - 0 1',
 };
 
-let sf=null,sfReady=false;
+let sf=null, sfReady=false;
 let chess=new Chess();
-let flipped=false,selected=null,highlights={};
-let pgnMoves=[],pgnIdx=-1;
-let depth=15,sfLines={},analyzing=false;
-let currentTab='analyse';
+// flipped=false → Weiß unten (Standard); flipped=true → Schwarz unten
+let flipped=false, selected=null, highlights={};
+let pgnMoves=[], pgnIdx=-1;
+let depth=15, sfLines={};
 let chatHistory=[];
 
 const canvas=document.getElementById('board');
 const ctx=canvas.getContext('2d');
-const SZ=45;
+const SZ=60; // px per square
+canvas.width=SZ*8;
+canvas.height=SZ*8;
 
-// ── Tabs ─────────────────────────────────────────────────
-function switchTab(t){
-  currentTab=t;
-  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',['analyse','endgame'][i]===t));
-  document.getElementById('panel-analyse').classList.toggle('active',t==='analyse');
-  document.getElementById('panel-endgame').classList.toggle('active',t==='endgame');
+// ── sq ↔ canvas pixel (proven logic from debug version) ──
+// col = file index 0-7 (a=0), canvasRow 0=top
+function sqToCanvas(sq){
+  const file=COLS.indexOf(sq[0]);
+  const rank=parseInt(sq[1])-1; // 0=rank1 .. 7=rank8
+  const col = flipped ? 7-file : file;
+  const row = flipped ? rank   : 7-rank;
+  return [col*SZ, row*SZ];
+}
+function canvasToSq(px,py){
+  const col=Math.floor(px/SZ);
+  const row=Math.floor(py/SZ);
+  if(col<0||col>7||row<0||row>7) return null;
+  const file = flipped ? 7-col : col;
+  const rank = flipped ? row   : 7-row;
+  return COLS[file]+(rank+1);
 }
 
-// ── Board rendering ───────────────────────────────────────
-function sq2xy(sq){const f=COLS.indexOf(sq[0]),r=parseInt(sq[1])-1;return[(flipped?7-f:f)*SZ,(flipped?r:7-r)*SZ]}
-function xy2sq(px,py){const c=Math.floor(px/SZ),r=Math.floor(py/SZ);const f=flipped?7-c:c,rank=flipped?r:7-r;if(f<0||f>7||rank<0||rank>7)return null;return COLS[f]+(rank+1)}
-
+// ── Drawing ───────────────────────────────────────────────
 function drawBoard(){
-  if(canvas.width!==SZ*8){canvas.width=canvas.height=SZ*8;}
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  for(let r=0;r<8;r++)for(let c=0;c<8;c++){ctx.fillStyle=(r+c)%2===0?'#f0d9b5':'#b58863';ctx.fillRect(c*SZ,r*SZ,SZ,SZ)}
-  for(const[sq,col]of Object.entries(highlights)){const[x,y]=sq2xy(sq);ctx.fillStyle=col;ctx.fillRect(x,y,SZ,SZ)}
-  const board=chess.board();
-  ctx.textAlign='center';ctx.textBaseline='middle';
-  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
-    const ar=flipped?r:7-r,ac=flipped?7-c:c;
-    const p=board[ar]?.[ac];
-    if(p){
-      const g=GLYPHS[p.color+p.type.toUpperCase()];
-      ctx.font=`${SZ*.74}px serif`;
-      ctx.fillStyle=p.color==='w'?'#fff':'#1a1a1a';
-      ctx.strokeStyle=p.color==='w'?'#555':'#ddd';
-      ctx.lineWidth=.6;
-      const x=c*SZ+SZ/2,y=r*SZ+SZ/2;
-      ctx.strokeText(g,x,y);ctx.fillText(g,x,y);
-    }
+  // Squares
+  for(let row=0;row<8;row++) for(let col=0;col<8;col++){
+    ctx.fillStyle=(row+col)%2===0 ? '#f0d9b5' : '#b58863';
+    ctx.fillRect(col*SZ, row*SZ, SZ, SZ);
   }
-  ctx.font='9px sans-serif';ctx.fillStyle='rgba(80,60,40,.7)';
-  for(let i=0;i<8;i++){ctx.fillText(flipped?i+1:8-i,3,i*SZ+10);ctx.fillText(COLS[flipped?7-i:i],i*SZ+SZ-7,SZ*8-3)}
+  // Highlights
+  for(const[sq,color] of Object.entries(highlights)){
+    const[x,y]=sqToCanvas(sq);
+    ctx.fillStyle=color;
+    ctx.fillRect(x,y,SZ,SZ);
+  }
+  // Pieces – use same indexing as debug: board[7-rank][file]
+  const board=chess.board(); // board[0]=rank8, board[7]=rank1
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(let rank=0;rank<8;rank++) for(let file=0;file<8;file++){
+    const p=board[7-rank][file]; // rank0=rank1, rank7=rank8
+    if(!p) continue;
+    const col = flipped ? 7-file : file;
+    const row = flipped ? rank   : 7-rank;
+    const g=GLYPHS[p.color+p.type.toUpperCase()];
+    ctx.font=`${Math.round(SZ*0.72)}px serif`;
+    ctx.lineWidth=0.8;
+    ctx.strokeStyle=p.color==='w'?'#555':'#ddd';
+    ctx.fillStyle  =p.color==='w'?'#fff':'#111';
+    ctx.strokeText(g, col*SZ+SZ/2, row*SZ+SZ/2);
+    ctx.fillText  (g, col*SZ+SZ/2, row*SZ+SZ/2);
+  }
+  // Coordinates
+  ctx.font=`${Math.round(SZ*0.18)}px sans-serif`;
+  ctx.fillStyle='rgba(80,60,40,0.8)';
+  for(let i=0;i<8;i++){
+    // rank numbers on left edge
+    const rankLabel = flipped ? i+1 : 8-i;
+    ctx.fillText(rankLabel, 3, i*SZ+11);
+    // file letters on bottom edge
+    const fileLabel = COLS[flipped ? 7-i : i];
+    ctx.fillText(fileLabel, i*SZ+SZ-8, SZ*8-3);
+  }
+  // Turn badge
   const t=chess.turn();
   document.getElementById('turn-badge').textContent=t==='w'?'⬜ Weiß am Zug':'⬛ Schwarz am Zug';
+  // Flip button label
+  const fb=document.getElementById('flip-btn');
+  if(fb) fb.textContent=flipped?'Weiß unten':'Schwarz unten';
 }
 
-// ── Click / move handling ────────────────────────────────
-canvas.addEventListener('click',e=>{
+// ── Click handling ────────────────────────────────────────
+canvas.addEventListener('click', e=>{
   const rect=canvas.getBoundingClientRect();
-  // Use rect dimensions for scaling (canvas CSS size vs pixel size)
-  const sq=xy2sq((e.clientX-rect.left)*(SZ*8/rect.width),(e.clientY-rect.top)*(SZ*8/rect.height));
-  if(!sq)return;
+  const px=(e.clientX-rect.left)*(canvas.width/rect.width);
+  const py=(e.clientY-rect.top) *(canvas.height/rect.height);
+  const sq=canvasToSq(px,py);
+  if(!sq) return;
+
   if(selected){
-    const legalMoves=chess.moves({square:selected,verbose:true});
-    const mv=legalMoves.find(m=>m.to===sq);
+    const legal=chess.moves({square:selected, verbose:true});
+    const mv=legal.find(m=>m.to===sq);
     if(mv){
-      const promo=mv.flags.includes('p')?promptPromo():'q';
-      const result=chess.move({from:selected,to:sq,promotion:promo});
-      if(result){
-        selected=null;highlights={};
-        drawBoard();startAnalysis();
-      }
+      const promo=mv.flags.includes('p')
+        ? (prompt('Umwandlung: q=Dame  r=Turm  b=Läufer  n=Springer','q')||'q')
+        : 'q';
+      chess.move({from:selected, to:sq, promotion:promo});
+      selected=null; highlights={};
+      drawBoard(); startAnalysis();
     } else {
-      // Click on different square: deselect, maybe select new piece
-      selected=null;highlights={};
+      // Deselect; maybe select a different piece
+      selected=null; highlights={};
       const p=chess.get(sq);
-      if(p){selectSq(sq,p);}
+      if(p){ selectSq(sq,p); }
       drawBoard();
     }
   } else {
     const p=chess.get(sq);
-    if(p){selectSq(sq,p);drawBoard();}
+    if(p){ selectSq(sq,p); drawBoard(); }
   }
 });
 
 function selectSq(sq,p){
-  // Only show legal move hints if it's that color's turn
-  selected=sq;highlights={};
-  highlights[sq]='rgba(255,255,0,.45)';
+  selected=sq;
+  highlights={};
+  highlights[sq]='rgba(255,220,0,0.55)';
   if(p.color===chess.turn()){
-    chess.moves({square:sq,verbose:true}).forEach(m=>{highlights[m.to]='rgba(0,210,80,.3)'});
+    chess.moves({square:sq, verbose:true})
+      .forEach(m=>{ highlights[m.to]='rgba(0,200,80,0.35)'; });
   }
-}
-
-function promptPromo(){
-  const choice=window.prompt('Umwandlung? q=Dame r=Turm b=Läufer n=Springer','q');
-  return['q','r','b','n'].includes(choice)?choice:'q';
 }
 
 // ── Board controls ────────────────────────────────────────
 function resetBoard(){
-  chess=new Chess();selected=null;highlights={};
-  pgnMoves=[];pgnIdx=-1;
+  chess=new Chess(); selected=null; highlights={};
+  pgnMoves=[]; pgnIdx=-1;
   document.getElementById('fen-input').value='';
   document.getElementById('pgn-input').value='';
   document.getElementById('move-nav').style.display='none';
-  drawBoard();startAnalysis();
+  drawBoard(); startAnalysis();
 }
 
-function flipBoard(){flipped=!flipped;drawBoard()}
+function flipBoard(){ flipped=!flipped; selected=null; highlights={}; drawBoard(); }
 
 function undoMove(){
-  if(chess.history().length===0){toast('Keine Züge zum Zurücknehmen');return}
-  chess.undo();selected=null;highlights={};
-  drawBoard();startAnalysis();
+  if(!chess.history().length){ toast('Keine Züge zum Zurücknehmen'); return; }
+  chess.undo(); selected=null; highlights={};
+  drawBoard(); startAnalysis();
 }
 
 function loadFen(){
   const fen=document.getElementById('fen-input').value.trim();
-  if(!fen)return;
+  if(!fen) return;
   const tmp=new Chess();
-  if(!tmp.load(fen)){toast('Ungültige FEN!');return}
-  chess=tmp;selected=null;highlights={};
-  pgnMoves=[];pgnIdx=-1;
+  if(!tmp.load(fen)){ toast('Ungültige FEN!'); return; }
+  chess=tmp; selected=null; highlights={};
+  pgnMoves=[]; pgnIdx=-1;
   document.getElementById('move-nav').style.display='none';
-  drawBoard();startAnalysis();
+  drawBoard(); startAnalysis();
 }
 
 function loadPgn(){
   const pgn=document.getElementById('pgn-input').value.trim();
-  if(!pgn)return;
+  if(!pgn) return;
   const tmp=new Chess();
-  if(!tmp.load_pgn(pgn)){toast('Ungültiger PGN!');return}
-  pgnMoves=tmp.history({verbose:true});pgnIdx=-1;
-  chess=new Chess();selected=null;highlights={};
+  if(!tmp.load_pgn(pgn)){ toast('Ungültiger PGN!'); return; }
+  pgnMoves=tmp.history({verbose:true}); pgnIdx=-1;
+  chess=new Chess(); selected=null; highlights={};
   document.getElementById('move-nav').style.display='flex';
-  drawBoard();updateMoveList();startAnalysis();
+  drawBoard(); updateMoveList(); startAnalysis();
 }
 
 function navMove(dir){
   const ni=Math.max(-1,Math.min(pgnMoves.length-1,pgnIdx+dir));
-  if(ni===pgnIdx)return;
-  pgnIdx=ni;chess=new Chess();
-  for(let i=0;i<=pgnIdx;i++)chess.move(pgnMoves[i]);
-  selected=null;highlights={};drawBoard();updateMoveList();startAnalysis();
+  if(ni===pgnIdx) return;
+  pgnIdx=ni; chess=new Chess();
+  for(let i=0;i<=pgnIdx;i++) chess.move(pgnMoves[i]);
+  selected=null; highlights={};
+  drawBoard(); updateMoveList(); startAnalysis();
 }
 
 function updateMoveList(){
-  const txt=pgnMoves.slice(0,pgnIdx+1).map((m,i)=>(i%2===0?Math.floor(i/2+1)+'.':'')+m.san).join(' ');
-  document.getElementById('move-list').textContent=txt||'Startstellung';
-  document.getElementById('move-list').title=txt;
+  const txt=pgnMoves.slice(0,pgnIdx+1)
+    .map((m,i)=>(i%2===0?Math.floor(i/2+1)+'.':'')+m.san).join(' ');
+  const el=document.getElementById('move-list');
+  el.textContent=txt||'Startstellung';
+  el.title=txt;
 }
 
 // ── Endgame presets ───────────────────────────────────────
 function loadEndgame(key){
   document.getElementById('eg-custom').style.display=key==='custom'?'block':'none';
-  if(key==='custom')return;
-  const fen=ENDGAMES[key];
-  if(!fen)return;
-  chess=new Chess(fen);selected=null;highlights={};
-  pgnMoves=[];pgnIdx=-1;
-  drawBoard();startAnalysis();
+  if(key==='custom') return;
+  const fen=ENDGAMES[key]; if(!fen) return;
+  chess=new Chess(fen); selected=null; highlights={};
+  pgnMoves=[]; pgnIdx=-1;
+  drawBoard(); startAnalysis();
   chatHistory=[];
   document.getElementById('chat-box').innerHTML='';
-  addChatMsg('ai','Stellung geladen. Stell mir Fragen zur Stellung oder klick auf eine Suggestion oben!');
+  addChatMsg('ai','Stellung geladen! Stell mir Fragen, oder klick oben auf eine Suggestion.');
 }
 
 function loadCustomEg(){
-  const fen=document.getElementById('eg-fen').value.trim();
-  if(!fen)return;
+  const fen=document.getElementById('eg-fen').value.trim(); if(!fen) return;
   const tmp=new Chess();
-  if(!tmp.load(fen)){toast('Ungültige FEN!');return}
-  chess=tmp;selected=null;highlights={};drawBoard();startAnalysis();
-  chatHistory=[];document.getElementById('chat-box').innerHTML='';
+  if(!tmp.load(fen)){ toast('Ungültige FEN!'); return; }
+  chess=tmp; selected=null; highlights={};
+  drawBoard(); startAnalysis();
+  chatHistory=[]; document.getElementById('chat-box').innerHTML='';
   addChatMsg('ai','Eigene Stellung geladen. Was möchtest du wissen?');
+}
+
+// ── Tabs ─────────────────────────────────────────────────
+function switchTab(t){
+  document.querySelectorAll('.tab').forEach((el,i)=>
+    el.classList.toggle('active',['analyse','endgame'][i]===t));
+  document.getElementById('panel-analyse').classList.toggle('active',t==='analyse');
+  document.getElementById('panel-endgame').classList.toggle('active',t==='endgame');
 }
 
 // ── Stockfish ─────────────────────────────────────────────
@@ -425,29 +463,34 @@ function initStockfish(){
   setStatus('Stockfish wird geladen…');
   sf=new Worker('stockfish.js');
   sf.onmessage=e=>handleSf(e.data);
-  sf.onerror=()=>setStatus('Fehler beim Laden von Stockfish. Liegt stockfish.js im selben Ordner?');
+  sf.onerror=()=>setStatus('Fehler: stockfish.js nicht gefunden oder nicht ladbar.');
   sf.postMessage('uci');
 }
 
 function handleSf(msg){
-  if(msg==='uciok'){sf.postMessage('isready');return}
-  if(msg==='readyok'){sfReady=true;setStatus('Stockfish bereit ✓');drawBoard();startAnalysis();return}
+  if(msg==='uciok'){ sf.postMessage('isready'); return; }
+  if(msg==='readyok'){
+    sfReady=true; setStatus('Stockfish bereit ✓');
+    drawBoard(); startAnalysis(); return;
+  }
   if(msg.startsWith('info')&&msg.includes('score')&&msg.includes(' pv ')){
-    const cp=msg.match(/score cp (-?\d+)/);
+    const cp  =msg.match(/score cp (-?\d+)/);
     const mate=msg.match(/score mate (-?\d+)/);
-    const pv=msg.match(/ pv (.+)/);
-    const mp=parseInt((msg.match(/multipv (\d+)/)||[,1])[1]);
-    const d=parseInt((msg.match(/depth (\d+)/)||[,0])[1]);
+    const pv  =msg.match(/ pv (.+)/);
+    const mp  =parseInt((msg.match(/multipv (\d+)/)||[,1])[1]);
+    const d   =parseInt((msg.match(/depth (\d+)/)||[,0])[1]);
     let score=null;
-    if(cp)score=parseInt(cp[1])/100;
-    if(mate)score=parseInt(mate[1])>0?999:-999;
+    if(cp)   score=parseInt(cp[1])/100;
+    if(mate) score=parseInt(mate[1])>0?999:-999;
     if(score!==null&&pv&&d>=5){
-      sfLines[mp]={score,pv:pv[1].split(' '),depth:d};
-      if(mp===1)updateEval(score);
+      sfLines[mp]={score, pv:pv[1].split(' '), depth:d};
+      if(mp===1) updateEval(score);
       updateLines();
     }
   }
-  if(msg.startsWith('bestmove')){analyzing=false;document.getElementById('spinner').style.display='none'}
+  if(msg.startsWith('bestmove')){
+    document.getElementById('spinner').style.display='none';
+  }
 }
 
 function uci2san(uci){
@@ -457,36 +500,38 @@ function uci2san(uci){
 }
 
 function updateEval(score){
-  const ws=chess.turn()==='w'?score:-score;
-  const pct=Math.max(4,Math.min(96,50+ws*5));
+  const whiteScore=chess.turn()==='w'?score:-score;
+  const pct=Math.max(4,Math.min(96,50+whiteScore*5));
   document.getElementById('eval-bar-fill').style.width=pct+'%';
-  const disp=score>=999?'Matt':score<=-999?'-Matt':(score>=0?'+':'')+score.toFixed(2);
+  const disp=score>=999?'Matt♔':score<=-999?'Matt♚':(score>=0?'+':'')+score.toFixed(2);
   document.getElementById('eval-num').textContent=disp;
   const bm=sfLines[1];
   if(bm?.pv?.length){
     document.getElementById('best-move').textContent=uci2san(bm.pv[0])||bm.pv[0];
     const uci=bm.pv[0];
     highlights={};
-    highlights[uci.slice(0,2)]='rgba(129,182,76,.35)';
-    highlights[uci.slice(2,4)]='rgba(129,182,76,.55)';
+    highlights[uci.slice(0,2)]='rgba(129,182,76,0.38)';
+    highlights[uci.slice(2,4)]='rgba(129,182,76,0.58)';
     drawBoard();
   }
 }
 
 function updateLines(){
-  document.getElementById('lines-box').innerHTML=Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
-    const s=l.score>=999?'Matt':l.score<=-999?'-Matt':(l.score>=0?'+':'')+l.score.toFixed(2);
-    const moves=l.pv.slice(0,6).map(u=>uci2san(u)||u).filter(Boolean).join(' ');
-    return`<div class="line"><span class="ls">${s}</span><span class="lm">${moves}</span><span class="ld">T${l.depth}</span></div>`;
-  }).join('');
+  document.getElementById('lines-box').innerHTML=
+    Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
+      const s=l.score>=999?'Matt':l.score<=-999?'-Matt':(l.score>=0?'+':'')+l.score.toFixed(2);
+      const moves=l.pv.slice(0,6).map(u=>uci2san(u)||u).filter(Boolean).join(' ');
+      return`<div class="line"><span class="ls">${s}</span><span class="lm">${moves}</span><span class="ld">T${l.depth}</span></div>`;
+    }).join('');
 }
 
 function startAnalysis(){
-  if(!sfReady||chess.game_over())return;
-  sfLines={};analyzing=true;
+  if(!sfReady||chess.game_over()) return;
+  sfLines={};
   document.getElementById('spinner').style.display='block';
   document.getElementById('best-move').textContent='…';
-  document.getElementById('lines-box').innerHTML='<div class="line"><span class="lm" style="color:#666">Analyse läuft…</span></div>';
+  document.getElementById('lines-box').innerHTML=
+    '<div class="line"><span class="lm" style="color:#555">Analyse läuft…</span></div>';
   sf.postMessage('stop');
   sf.postMessage('setoption name MultiPV value 3');
   sf.postMessage('position fen '+chess.fen());
@@ -495,12 +540,13 @@ function startAnalysis(){
 }
 
 document.getElementById('depth-slider').addEventListener('input',function(){
-  depth=+this.value;document.getElementById('depth-val').textContent=depth;
+  depth=+this.value;
+  document.getElementById('depth-val').textContent=depth;
 });
 document.getElementById('depth-slider').addEventListener('change',()=>startAnalysis());
 
 // ── Claude chat ───────────────────────────────────────────
-function askQ(q){document.getElementById('chat-input').value=q;sendChat()}
+function askQ(q){ document.getElementById('chat-input').value=q; sendChat(); }
 
 function addChatMsg(role,text){
   const box=document.getElementById('chat-box');
@@ -514,58 +560,51 @@ function addChatMsg(role,text){
 
 async function sendChat(){
   const inp=document.getElementById('chat-input');
-  const q=inp.value.trim();
-  if(!q)return;
+  const q=inp.value.trim(); if(!q) return;
   inp.value='';
   addChatMsg('user',q);
 
-  const bm=sfLines[1];
   const evalScore=document.getElementById('eval-num').textContent;
-  const lines=Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
+  const linesText=Object.entries(sfLines).sort((a,b)=>+a[0]-+b[0]).map(([,l])=>{
     const s=l.score>=999?'Matt':l.score<=-999?'-Matt':(l.score>=0?'+':'')+l.score.toFixed(2);
     return s+': '+l.pv.slice(0,5).map(u=>uci2san(u)||u).join(' ');
   }).join('\n');
-  const bestMove=bm?uci2san(bm.pv[0]):'unbekannt';
+  const bestMove=sfLines[1]?uci2san(sfLines[1].pv[0]):'—';
   const history=chess.history().slice(-20).join(' ');
 
-  const systemPrompt=`Du bist ein erfahrener Schachtrainer. Antworte auf Deutsch, präzise und lehrreich.
-Aktuelle Stellung (FEN): ${chess.fen()}
-Stockfish-Bewertung: ${evalScore}
-Bester Zug: ${bestMove}
-Stockfish-Varianten:\n${lines||'keine'}
-Letzte Züge: ${history||'keine'}
-Analysiere die Stellung aus Sicht beider Seiten. Erkläre Konzepte verständlich.`;
+  const sys=`Du bist ein erfahrener Schachtrainer. Antworte auf Deutsch, präzise und lehrreich. Maximal 4 kurze Absätze.
+FEN: ${chess.fen()}
+Bewertung: ${evalScore} | Bester Zug: ${bestMove}
+Stockfish-Varianten:\n${linesText||'keine'}
+Letzte Züge: ${history||'—'}`;
 
   chatHistory.push({role:'user',content:q});
-
   const thinking=addChatMsg('thinking','Claude denkt…');
-
   try{
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens:1000,
-        system:systemPrompt,
-        messages:chatHistory
-      })
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:chatHistory})
     });
     const data=await res.json();
-    const reply=data.content?.map(c=>c.text||'').join('')||'Fehler bei der Antwort.';
+    const reply=data.content?.map(c=>c.text||'').join('')||'(keine Antwort)';
     thinking.remove();
     addChatMsg('ai',reply);
     chatHistory.push({role:'assistant',content:reply});
-    if(chatHistory.length>12)chatHistory=chatHistory.slice(-12);
+    if(chatHistory.length>12) chatHistory=chatHistory.slice(-12);
   }catch(err){
     thinking.remove();
-    addChatMsg('ai','Verbindungsfehler zu Claude. Prüfe die API-Anbindung.');
+    addChatMsg('ai','Verbindungsfehler zu Claude.');
   }
 }
 
 // ── Utilities ─────────────────────────────────────────────
-function setStatus(msg){document.getElementById('statusbar').textContent=msg}
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+function setStatus(msg){ document.getElementById('statusbar').textContent=msg; }
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2500);
+}
 
 // ── Init ──────────────────────────────────────────────────
 initStockfish();
